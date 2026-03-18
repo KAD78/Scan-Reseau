@@ -72,9 +72,14 @@ pkg install nmap
 pkg install python
 pip install requests
 
+git clone https://github.com/KAD78/Scan-Reseau.git
+
+
 INSTALLATION Dans Linux / PC
 pip install requests
 sudo apt install nmap nikto
+
+git clone https://github.com/KAD78/Scan-Reseau.git
 
 
 🔥 CE QUE Vous OBTIENDREZ :
