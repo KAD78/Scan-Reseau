@@ -1,3 +1,141 @@
+
+#!/usr/bin/env python3
+import asyncio, ipaddress, subprocess, sys, shutil
+
+TIMEOUT = 1
+MAX_CONCURRENT = 500
+
+# ================= SCAN =================
+async def scan_port(ip, port):
+    try:
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(ip, port), timeout=TIMEOUT
+        )
+
+        banner = ""
+
+        if port in [80,8080,8000]:
+            writer.write(b"GET / HTTP/1.0\r\n\r\n")
+            await writer.drain()
+
+        data = await asyncio.wait_for(reader.read(1024), timeout=TIMEOUT)
+
+        if data:
+            banner = data.decode(errors="ignore").strip().split("\n")[0][:100]
+
+        writer.close()
+        await writer.wait_closed()
+
+        return (port, banner)
+
+    except:
+        return None
+
+async def run_scan(target, ports):
+    ips = expand_targets(target)
+    results = []
+
+    sem = asyncio.Semaphore(MAX_CONCURRENT)
+
+    async def sem_scan(ip, port):
+        async with sem:
+            return await scan_port(ip, port)
+
+    tasks = []
+    for ip in ips:
+        for port in ports:
+            tasks.append((ip, port, asyncio.create_task(sem_scan(ip, port))))
+
+    for ip, port, task in tasks:
+        res = await task
+        if res:
+            results.append({
+                "ip": ip,
+                "port": port,
+                "banner": res[1]
+            })
+
+    return results
+
+def expand_targets(target):
+    try:
+        net = ipaddress.ip_network(target, strict=False)
+        return [str(ip) for ip in net.hosts()]
+    except:
+        return [target]
+
+# ================= DETECTION =================
+def detect_service(port, banner):
+    banner = banner.lower()
+
+    if "nginx" in banner:
+        return "nginx"
+    if "apache" in banner:
+        return "apache"
+    if "ssh" in banner:
+        return "ssh"
+    if "ftp" in banner:
+        return "ftp"
+    if "rtsp" in banner or port == 554:
+        return "IP Camera (RTSP)"
+
+    return "Unknown"
+
+# ================= NMAP =================
+def run_nmap(ip):
+    if not shutil.which("nmap"):
+        print("\n[!] Nmap not installed → skipping")
+        return
+
+    print("\n[+] Running Nmap (service detection)...\n")
+
+    try:
+        result = subprocess.run(
+            ["nmap", "-sV", "-Pn", ip],
+            capture_output=True,
+            text=True
+        )
+
+        print(result.stdout)
+
+    except Exception as e:
+        print(f"[!] Error running Nmap: {e}")
+
+# ================= MAIN =================
+def main():
+    print("\n=== Network Audit Tool PRO ===\n")
+
+    target = input("Target IP/CIDR: ")
+    ports = input("Ports (ex: 22,80,443): ")
+    ports = [int(p.strip()) for p in ports.split(",")]
+
+    print("\n[+] Fast scanning...\n")
+    results = asyncio.run(run_scan(target, ports))
+
+    if not results:
+        print("No open ports found.")
+    else:
+        print("=== FAST SCAN RESULTS ===\n")
+
+        for r in results:
+            service = detect_service(r["port"], r["banner"])
+            print(f"[+] {r['ip']}:{r['port']} → {service}")
+
+            if r["banner"]:
+                print(f"    Banner: {r['banner']}")
+
+    # ===== NMAP =====
+    run = input("\nRun deep scan with Nmap? (y/n): ")
+
+    if run.lower() == "y":
+        run_nmap(target)
+
+if __name__ == "__main__":
+    main()
+
+
+"""
+
 #!/usr/bin/env python3
 import asyncio, ipaddress, subprocess, sys
 
@@ -143,3 +281,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+"""
